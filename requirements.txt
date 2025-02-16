@@ -1,2 +1,8 @@
 streamlit
 pandas
+plotly
+jieba
+wordcloud
+numpy
+scikit-learn
+prophet
