@@ -798,7 +798,7 @@ def main():
         f'{markdown_folder}/心梗.md', f'{markdown_folder}/支原体.md',
         f'{markdown_folder}/坠机.md'
     ]
-
+    st.caption("[点击查看示例md文件](https://github.com/Feather-2/Wb-Health-Trend-Analysis/blob/main/raw-markdown/%E6%94%AF%E5%8E%9F%E4%BD%93.md)")
     # 新增文件上传功能
     uploaded_files = st.sidebar.file_uploader(
         "上传自定义MD文件（支持多个）",
