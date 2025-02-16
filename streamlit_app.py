@@ -899,107 +899,126 @@ def main():
         if selected_category:
             st.plotly_chart(plot_timeline_gantt(filtered_df, selected_category))
 
-        # 显示该类别的统计信息（保持原有代码）
-        if selected_category:
-            category_df = filtered_df[filtered_df['category'] == selected_category]
-            st.subheader(f'{selected_category}类别统计信息')
-            st.write(f"热搜数量: {len(category_df)}")
-            st.write(f"平均排名: {category_df['rank'].mean():.2f}")
-            st.write(f"平均持续时间: {category_df['duration_mins'].mean():.2f}分钟")
+        # 显示该类别的统计信息（修改为使用columns布局）
+        category_df = filtered_df[filtered_df['category'] == selected_category]
+        st.subheader(f'{selected_category}类别统计信息')
 
-            # 新增动态数据表
-            st.subheader('实时数据表')
-
-            # 添加日期范围选择（使用两列布局）
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input("开始日期",
-                    value=category_df['date'].min().to_pydatetime(),
-                    min_value=category_df['date'].min().to_pydatetime(),
-                    max_value=category_df['date'].max().to_pydatetime())
-            with col2:
-                end_date = st.date_input("结束日期",
-                    value=category_df['date'].max().to_pydatetime(),
-                    min_value=category_df['date'].min().to_pydatetime(),
-                    max_value=category_df['date'].max().to_pydatetime())
-
-            # 添加多重排序选项
-            sort_cols = st.multiselect(
-                "排序字段（按优先级顺序）",
-                options=['上榜时间', '持续分钟', '最高排名'],
-                default=['上榜时间']
+        # 使用三列布局
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                label="热搜数量",
+                value=len(category_df),
+                help="该类别下的总热搜条目数"
             )
-            sort_orders = {col: st.selectbox(
-                f"{col}排序方向",
-                ['升序 ↑', '降序 ↓'],
-                key=f"order_{col}"
-            ) for col in sort_cols}
-
-            # 处理数据
-            dynamic_df = category_df[['title', 'date', 'duration_mins', 'rank']].copy()
-            # 新增链接列
-            dynamic_df['link'] = dynamic_df['title'].apply(
-                lambda x: f'https://s.weibo.com/weibo?q=%23{urllib.parse.quote(x)}%23'
+        with col2:
+            st.metric(
+                label="平均排名",
+                value=f"{category_df['rank'].mean():.2f}",
+                delta="TOP 50" if category_df['rank'].mean() < 50 else "低位热搜",
+                delta_color="off",
+                help="该类别热搜的平均最高排名"
             )
-            dynamic_df = dynamic_df[
-                (dynamic_df['date'].dt.date >= start_date) &
-                (dynamic_df['date'].dt.date <= end_date)
+        with col3:
+            st.metric(
+                label="平均持续时间",
+                value=f"{category_df['duration_mins'].mean():.2f} 分钟",
+                help="该类别热搜的平均在榜时间"
+            )
+
+        # 新增动态数据表
+        st.subheader('实时数据表')
+
+        # 添加日期范围选择（使用两列布局）
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("开始日期",
+                value=category_df['date'].min().to_pydatetime(),
+                min_value=category_df['date'].min().to_pydatetime(),
+                max_value=category_df['date'].max().to_pydatetime())
+        with col2:
+            end_date = st.date_input("结束日期",
+                value=category_df['date'].max().to_pydatetime(),
+                min_value=category_df['date'].min().to_pydatetime(),
+                max_value=category_df['date'].max().to_pydatetime())
+
+        # 添加多重排序选项
+        sort_cols = st.multiselect(
+            "排序字段（按优先级顺序）",
+            options=['上榜时间', '持续分钟', '最高排名'],
+            default=['上榜时间']
+        )
+        sort_orders = {col: st.selectbox(
+            f"{col}排序方向",
+            ['升序 ↑', '降序 ↓'],
+            key=f"order_{col}"
+        ) for col in sort_cols}
+
+        # 处理数据
+        dynamic_df = category_df[['title', 'date', 'duration_mins', 'rank']].copy()
+        # 新增链接列
+        dynamic_df['link'] = dynamic_df['title'].apply(
+            lambda x: f'https://s.weibo.com/weibo?q=%23{urllib.parse.quote(x)}%23'
+        )
+        dynamic_df = dynamic_df[
+            (dynamic_df['date'].dt.date >= start_date) &
+            (dynamic_df['date'].dt.date <= end_date)
+        ]
+
+        # 应用多重排序
+        if sort_cols:
+            sort_ascending = [
+                order == '升序 ↑' for col, order in sort_orders.items()
             ]
-
-            # 应用多重排序
-            if sort_cols:
-                sort_ascending = [
-                    order == '升序 ↑' for col, order in sort_orders.items()
-                ]
-                dynamic_df = dynamic_df.sort_values(
-                    by=[col.replace('上榜时间', 'date')
-                        .replace('持续分钟', 'duration_mins')
-                        .replace('最高排名', 'rank') for col in sort_cols],
-                    ascending=sort_ascending
-                )
-            else:
-                dynamic_df = dynamic_df.sort_values('date', ascending=False)
-
-            # 格式化显示（修改列名并添加链接列）
-            display_df = dynamic_df.copy()
-            display_df.columns = ['热搜标题', '上榜时间', '持续分钟', '最高排名', '实时链接']
-
-            # 使用增强版数据表格（修改列配置）
-            st.data_editor(
-                display_df,
-                height=400,
-                column_config={
-                    "实时链接": st.column_config.LinkColumn(
-                        help="点击查看实时微博讨论",
-                        display_text="查看",
-                        width="small"
-                    ),
-                    "热搜标题": st.column_config.Column(
-                        width="large"
-                    ),
-                    "上榜时间": st.column_config.DatetimeColumn(
-                        format="YYYY-MM-DD HH:mm",
-                        help="热搜首次上榜时间"
-                    ),
-                    "持续分钟": st.column_config.ProgressColumn(
-                        format="%d 分钟",
-                        help="热搜持续时长",
-                        min_value=0,
-                        max_value=int(display_df['持续分钟'].max() * 1.2)
-                    ),
-                    "最高排名": st.column_config.NumberColumn(
-                        format="TOP %d",
-                        help="历史最高排名"
-                    )
-                },
-                use_container_width=True,
-                key=f"datagrid_{selected_category}",
-                disabled=True
+            dynamic_df = dynamic_df.sort_values(
+                by=[col.replace('上榜时间', 'date')
+                    .replace('持续分钟', 'duration_mins')
+                    .replace('最高排名', 'rank') for col in sort_cols],
+                ascending=sort_ascending
             )
+        else:
+            dynamic_df = dynamic_df.sort_values('date', ascending=False)
 
-            # 显示该类别的原始数据（保持原有代码）
-            if st.checkbox(f'显示{selected_category}原始数据'):
-                st.write(category_df)
+        # 格式化显示（修改列名并添加链接列）
+        display_df = dynamic_df.copy()
+        display_df.columns = ['热搜标题', '上榜时间', '持续分钟', '最高排名', '实时链接']
+
+        # 使用增强版数据表格（修改列配置）
+        st.data_editor(
+            display_df,
+            height=400,
+            column_config={
+                "实时链接": st.column_config.LinkColumn(
+                    help="点击查看实时微博讨论",
+                    display_text="查看",
+                    width="small"
+                ),
+                "热搜标题": st.column_config.Column(
+                    width="large"
+                ),
+                "上榜时间": st.column_config.DatetimeColumn(
+                    format="YYYY-MM-DD HH:mm",
+                    help="热搜首次上榜时间"
+                ),
+                "持续分钟": st.column_config.ProgressColumn(
+                    format="%d 分钟",
+                    help="热搜持续时长",
+                    min_value=0,
+                    max_value=int(display_df['持续分钟'].max() * 1.2)
+                ),
+                "最高排名": st.column_config.NumberColumn(
+                    format="TOP %d",
+                    help="历史最高排名"
+                )
+            },
+            use_container_width=True,
+            key=f"datagrid_{selected_category}",
+            disabled=True
+        )
+
+        # 显示该类别的原始数据（保持原有代码）
+        if st.checkbox(f'显示{selected_category}原始数据'):
+            st.write(category_df)
 
     # 原始数据展示
     if st.checkbox('显示所有原始数据'):
