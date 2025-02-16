@@ -788,7 +788,7 @@ def main():
         f'{markdown_folder}/离世.md', f'{markdown_folder}/流感.md',
         f'{markdown_folder}/去世.md', f'{markdown_folder}/生病.md',
         f'{markdown_folder}/心梗.md', f'{markdown_folder}/支原体.md',
-        f'{markdown_folder}/坠机.md', f'{markdown_folder}/文宏.md'
+        f'{markdown_folder}/坠机.md', f'{markdown_folder}/宏.md'
     ]
 
     # 新增文件上传功能
