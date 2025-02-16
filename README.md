@@ -1,7 +1,6 @@
 # Weibo Hot Search Analysis Tool
 
-![[Streamlit App](https://wb-health-trend-analysis.streamlit.app/)](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)
-
+![Streamlit App](https://wb-health-trend-analysis.streamlit.app/)
 一个综合的仪表板，用于分析Weibo热搜趋势，具有交互式可视化和时间序列预测功能。
 
 ## Table of Contents
