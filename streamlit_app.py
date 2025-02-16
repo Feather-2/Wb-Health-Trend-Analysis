@@ -12,6 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from prophet import Prophet
 from prophet.plot import plot_plotly
 import os
+import urllib.parse
 
 # 数据加载和处理
 def load_and_process_data(files):
@@ -774,6 +775,13 @@ def plot_hourly_distribution(df):
 
 # 主应用
 def main():
+    # 新增页面配置
+    st.set_page_config(
+        page_title="Weibo Health Trend Analysis",
+        layout="wide",  # 设置为宽屏模式
+        initial_sidebar_state="expanded"
+    )
+
     st.title('Weibo Health Trend Analysis')
     st.caption('数据来源：[Entobit丨热搜神器Pro](https://www.entobit.cn/hot-search/desktop)')
 
@@ -788,7 +796,7 @@ def main():
         f'{markdown_folder}/离世.md', f'{markdown_folder}/流感.md',
         f'{markdown_folder}/去世.md', f'{markdown_folder}/生病.md',
         f'{markdown_folder}/心梗.md', f'{markdown_folder}/支原体.md',
-        f'{markdown_folder}/坠机.md', f'{markdown_folder}/宏.md'
+        f'{markdown_folder}/坠机.md'
     ]
 
     # 新增文件上传功能
@@ -929,6 +937,10 @@ def main():
 
             # 处理数据
             dynamic_df = category_df[['title', 'date', 'duration_mins', 'rank']].copy()
+            # 新增链接列
+            dynamic_df['link'] = dynamic_df['title'].apply(
+                lambda x: f'https://s.weibo.com/weibo?q=%23{urllib.parse.quote(x)}%23'
+            )
             dynamic_df = dynamic_df[
                 (dynamic_df['date'].dt.date >= start_date) &
                 (dynamic_df['date'].dt.date <= end_date)
@@ -948,15 +960,23 @@ def main():
             else:
                 dynamic_df = dynamic_df.sort_values('date', ascending=False)
 
-            # 格式化显示（保持datetime类型）
+            # 格式化显示（修改列名并添加链接列）
             display_df = dynamic_df.copy()
-            display_df.columns = ['热搜标题', '上榜时间', '持续分钟', '最高排名']
+            display_df.columns = ['热搜标题', '上榜时间', '持续分钟', '最高排名', '实时链接']
 
-            # 使用增强版数据表格
+            # 使用增强版数据表格（修改列配置）
             st.data_editor(
                 display_df,
                 height=400,
                 column_config={
+                    "实时链接": st.column_config.LinkColumn(
+                        help="点击查看实时微博讨论",
+                        display_text="查看",
+                        width="small"
+                    ),
+                    "热搜标题": st.column_config.Column(
+                        width="large"
+                    ),
                     "上榜时间": st.column_config.DatetimeColumn(
                         format="YYYY-MM-DD HH:mm",
                         help="热搜首次上榜时间"
@@ -974,7 +994,7 @@ def main():
                 },
                 use_container_width=True,
                 key=f"datagrid_{selected_category}",
-                disabled=True  # 如果不需要编辑功能建议保留
+                disabled=True
             )
 
             # 显示该类别的原始数据（保持原有代码）
