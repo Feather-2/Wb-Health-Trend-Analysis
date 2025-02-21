@@ -14,6 +14,7 @@ from prophet.plot import plot_plotly
 import os
 import urllib.parse
 
+
 # 数据加载和处理
 def load_and_process_data(files):
     all_data = []
@@ -773,6 +774,713 @@ def plot_hourly_distribution(df):
 
     return fig
 
+def plot_monthly_distribution(df):
+    # 提取月份信息并统计
+    df['month'] = df['date'].dt.month  # 改回使用月份数字
+    monthly_counts = df.groupby(['month', 'category']).size().reset_index(name='count')
+
+    # 计算每个类别的总数量用于标准化
+    total_counts = df.groupby('category').size().reset_index(name='total')
+    monthly_data = monthly_counts.merge(total_counts, on='category')
+    monthly_data['percentage'] = (monthly_data['count'] / monthly_data['total']) * 100
+
+    # 计算每个类别的月份排名
+    monthly_data['rank'] = monthly_data.groupby('category')['percentage'].rank(ascending=False, method='min')
+    monthly_data['color'] = np.select(
+        [monthly_data['rank'] == 1, monthly_data['rank'] == 2, monthly_data['rank'] == 3],
+        ['#FF0000', '#FFA500', '#FFFF00'],  # 红、橙、黄
+        default='#D3D3D3'  # 灰色
+    )
+
+    # 创建分面柱状图
+    fig = px.bar(monthly_data,
+                 x='month',
+                 y='percentage',
+                 color='color',
+                 facet_col='category',
+                 facet_col_wrap=4,
+                 title='各类热搜月份分布（标准化百分比）',
+                 labels={'month': '月份', 'percentage': '占比 (%)'},
+                 height=600)
+
+    # 调整布局以为图例留出空间
+    fig.update_layout(
+        margin=dict(l=50, r=150, t=100, b=50),  # 增加右侧边距
+    )
+
+    # 隐藏原始数据的图例
+    fig.update_traces(showlegend=False)
+
+    # 更新图例样式
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(
+            title="<b>颜色说明</b>",
+            x=1.02,  # 位于图表右侧
+            y=0.98,  # 位于顶部
+            xanchor='left',  # 左对齐
+            yanchor='top',
+            bgcolor='rgba(255,255,255,0.8)',  # 半透明白色背景
+            bordercolor='black',
+            borderwidth=1,
+            itemsizing='constant',
+            itemwidth=30,
+            font=dict(size=12),
+        )
+    )
+
+    # 只添加颜色说明的图例项
+    fig.add_trace(
+        go.Bar(
+            x=[None], y=[None],
+            name="最活跃月份",
+            marker_color='#FF0000',
+            showlegend=True
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=[None], y=[None],
+            name="第二活跃月份",
+            marker_color='#FFA500',
+            showlegend=True
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=[None], y=[None],
+            name="第三活跃月份",
+            marker_color='#FFFF00',
+            showlegend=True
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=[None], y=[None],
+            name="其他月份",
+            marker_color='#D3D3D3',
+            showlegend=True
+        )
+    )
+
+    # 统一坐标轴设置
+    fig.update_xaxes(
+        tickvals=list(range(1, 13)),
+        ticktext=['一月', '二月', '三月', '四月', '五月', '六月',
+                 '七月', '八月', '九月', '十月', '十一月', '十二月'],
+        matches=None
+    )
+
+    # 隐藏所有子图的y轴
+    fig.update_yaxes(
+        showgrid=False,
+        showticklabels=False,
+        title=None
+    )
+
+    # 优化子图标题
+    for annotation in fig.layout.annotations:
+        if annotation.text:
+            annotation.text = annotation.text.split("=")[-1]
+            annotation.font = dict(size=14, color='#2c3e50')
+
+    return fig
+
+def plot_topic_cooccurrence(df):
+    """分析热搜话题共现关系"""
+    # ... 现有代码 ...
+
+    # 创建共现矩阵
+    df['date_trunc'] = df['date'].dt.floor('D')  # 按天截断时间
+    cooccurrence = pd.DataFrame(index=df['category'].unique(), columns=df['category'].unique())
+
+    for date in df['date_trunc'].unique():
+        daily_categories = df[df['date_trunc'] == date]['category'].unique()
+        for cat1 in daily_categories:
+            for cat2 in daily_categories:
+                if cat1 != cat2:
+                    cooccurrence.loc[cat1, cat2] = cooccurrence.loc[cat1, cat2] + 1 if not pd.isna(cooccurrence.loc[cat1, cat2]) else 1
+
+    # 创建热力图
+    fig = go.Figure(data=go.Heatmap(
+        z=cooccurrence.values,
+        x=cooccurrence.columns,
+        y=cooccurrence.index,
+        colorscale='Viridis',
+        hoverongaps=False))
+
+    fig.update_layout(
+        title='热搜话题共现热力图',
+        xaxis_title='类别',
+        yaxis_title='类别',
+        height=600
+    )
+
+    return fig
+
+def plot_topic_velocity(df):
+    """分析热搜传播速度"""
+    # 计算每个热搜从首次出现到达最高排名的时间
+    df_velocity = df.copy()
+    df_velocity['velocity'] = df_velocity['rank'] / df_velocity['duration_mins']
+
+    # 按类别统计平均传播速度
+    velocity_by_category = df_velocity.groupby('category')['velocity'].mean().sort_values()
+
+    # 创建条形图
+    fig = go.Figure(data=go.Bar(
+        x=velocity_by_category.index,
+        y=velocity_by_category.values,
+        marker_color='lightblue'
+    ))
+
+    fig.update_layout(
+        title='各类热搜平均传播速度',
+        xaxis_title='类别',
+        yaxis_title='传播速度 (排名/分钟)',
+        height=500
+    )
+
+    return fig
+
+def plot_topic_impact_analysis(df):
+    """分析热搜话题影响力"""
+    # 计算综合影响力分数
+    df_impact = df.copy()
+
+    # 归一化处理
+    df_impact['rank_score'] = 1 - (df_impact['rank'] / 50)  # 排名越高分数越高
+    df_impact['duration_score'] = df_impact['duration_mins'] / df_impact['duration_mins'].max()
+
+    # 计算综合影响力分数 (考虑排名和持续时间)
+    df_impact['impact_score'] = (df_impact['rank_score'] * 0.6 +
+                                df_impact['duration_score'] * 0.4)
+
+    # 按类别统计平均影响力
+    impact_by_category = df_impact.groupby('category').agg({
+        'impact_score': ['mean', 'std'],
+        'rank_score': 'mean',
+        'duration_score': 'mean'
+    }).round(3)
+
+    # 创建多指标条形图
+    fig = go.Figure()
+
+    # 添加综合影响力
+    fig.add_trace(go.Bar(
+        name='综合影响力',
+        x=impact_by_category.index,
+        y=impact_by_category[('impact_score', 'mean')],
+        error_y=dict(
+            type='data',
+            array=impact_by_category[('impact_score', 'std')],
+            visible=True
+        ),
+        marker_color='rgb(55, 83, 109)'
+    ))
+
+    # 添加排名得分
+    fig.add_trace(go.Bar(
+        name='排名得分',
+        x=impact_by_category.index,
+        y=impact_by_category[('rank_score', 'mean')],
+        marker_color='rgb(26, 118, 255)'
+    ))
+
+    # 添加持续时间得分
+    fig.add_trace(go.Bar(
+        name='持续时间得分',
+        x=impact_by_category.index,
+        y=impact_by_category[('duration_score', 'mean')],
+        marker_color='rgb(158, 202, 225)'
+    ))
+
+    fig.update_layout(
+        title='各类热搜影响力分析',
+        xaxis_title='类别',
+        yaxis_title='得分',
+        barmode='group',
+        height=500,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+
+    return fig
+
+def plot_sentiment_analysis(df):
+    """分析热搜话题情感倾向"""
+    # 计算情感得分
+    df['sentiment'] = df['title'].apply(lambda x: SnowNLP(x).sentiments)
+
+    # 按类别统计平均情感得分
+    sentiment_by_category = df.groupby('category')['sentiment'].agg(['mean', 'std']).round(3)
+
+    # 创建误差条形图
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name='情感得分',
+        x=sentiment_by_category.index,
+        y=sentiment_by_category['mean'],
+        error_y=dict(
+            type='data',
+            array=sentiment_by_category['std'],
+            visible=True
+        )
+    ))
+
+    fig.update_layout(
+        title='各类热搜情感分析',
+        xaxis_title='类别',
+        yaxis_title='情感得分 (0-负面, 1-正面)',
+        height=500
+    )
+
+    return fig
+
+def plot_word_frequency(df, category=None):
+    """分析热搜话题关键词频率"""
+    # 过滤特定类别（如果指定）
+    if category:
+        df = df[df['category'] == category]
+
+    # 分词并统计词频
+    text = ' '.join(df['title'])
+    words = jieba.cut(text)
+    word_freq = pd.Series(' '.join(words).split()).value_counts()
+
+    # 创建条形图
+    fig = go.Figure(data=go.Bar(
+        x=word_freq.head(20).index,
+        y=word_freq.head(20).values,
+        marker_color='lightgreen'
+    ))
+
+    title = f'{"" if not category else category + "类别"}热搜关键词TOP20'
+    fig.update_layout(
+        title=title,
+        xaxis_title='关键词',
+        yaxis_title='出现次数',
+        height=500
+    )
+
+    return fig
+
+def parse_logic_expression(expression):
+    """解析逻辑表达式
+    支持格式:
+    - 单个词: "发烧"
+    - AND: "发烧 and 咳嗽"
+    - OR: "发烧 or 咳嗽"
+    - 括号: "(发烧 or 咳嗽) and 医院"
+    """
+    def tokenize(expr):
+        # 处理括号
+        expr = expr.replace('(', ' ( ').replace(')', ' ) ')
+        return expr.lower().split()
+
+    def parse(tokens):
+        if not tokens:
+            return None
+
+        def parse_term():
+            token = tokens.pop(0)
+            if token == '(':
+                result = parse_expression()
+                if tokens and tokens[0] == ')':
+                    tokens.pop(0)
+                return result
+            return token
+
+        def parse_expression():
+            terms = [parse_term()]
+            while tokens and tokens[0] in ['and', 'or']:
+                op = tokens.pop(0)
+                terms.append(op)
+                terms.append(parse_term())
+            return terms
+
+        return parse_expression()
+
+    tokens = tokenize(expression)
+    return parse(tokens)
+
+def evaluate_logic(df, parsed_expr):
+    """评估逻辑表达式"""
+    if not parsed_expr:
+        return pd.Series(True, index=df.index)
+
+    def evaluate_term(term):
+        if isinstance(term, list):
+            return evaluate_logic(df, term)
+        if term in ['and', 'or']:
+            return term
+        return df['title'].str.contains(term)
+
+    if len(parsed_expr) == 1:
+        return evaluate_term(parsed_expr[0])
+
+    result = evaluate_term(parsed_expr[0])
+    i = 1
+    while i < len(parsed_expr):
+        op = parsed_expr[i]
+        next_term = evaluate_term(parsed_expr[i + 1])
+        if op == 'and':
+            result = result & next_term
+        elif op == 'or':
+            result = result | next_term
+        i += 2
+
+    return result
+
+def analyze_keyword_patterns(df, category, include_expression=None, exclude_expression=None, must_include_main=True, start_date=None, end_date=None):
+    """分析热搜标题中的关键词模式
+
+    Args:
+        df: 数据框
+        category: 类别名称
+        include_expression: 包含关键词的逻辑表达式
+        exclude_expression: 排除关键词的逻辑表达式
+        must_include_main: 是否必须包含主关键词
+        start_date: 开始日期
+        end_date: 结束日期
+    """
+    # 获取该类别的数据
+    category_df = df[df['category'] == category].copy()
+
+    # 应用日期筛选
+    if start_date and end_date:
+        category_df = category_df[
+            (category_df['date'].dt.date >= start_date) &
+            (category_df['date'].dt.date <= end_date)
+        ]
+
+    # 初始化筛选条件
+    filtered_df = category_df.copy()
+
+    # 应用主关键词筛选
+    if must_include_main:
+        filtered_df = filtered_df[filtered_df['title'].str.contains(category)]
+
+    # 应用包含关键词筛选
+    if include_expression:
+        try:
+            parsed_expr = parse_logic_expression(include_expression)
+            mask = evaluate_logic(filtered_df, parsed_expr)
+            filtered_df = filtered_df[mask]
+        except Exception as e:
+            st.error(f"包含关键词表达式解析错误: {str(e)}")
+
+    # 应用排除关键词筛选
+    if exclude_expression:
+        try:
+            parsed_expr = parse_logic_expression(exclude_expression)
+            mask = evaluate_logic(filtered_df, parsed_expr)
+            filtered_df = filtered_df[~mask]
+        except Exception as e:
+            st.error(f"排除关键词表达式解析错误: {str(e)}")
+
+    # 修改统计信息，添加时间范围说明
+    date_range_str = ""
+    if start_date and end_date:
+        date_range_str = f"({start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')})"
+
+    stats = {
+        '符合条件的热搜数': len(filtered_df),
+        '占该类别总数比例': f"{(len(filtered_df) / len(category_df) * 100):.1f}%",
+        '平均排名': f"{filtered_df['rank'].mean():.1f}",
+        '平均持续时间': f"{filtered_df['duration_mins'].mean():.1f}分钟",
+        '时间范围': date_range_str
+    }
+
+    return filtered_df, stats
+
+def get_top_keywords(df, category, top_n=20):
+    """获取某个类别最常见的关键词"""
+    category_df = df[df['category'] == category]
+    text = ' '.join(category_df['title'])
+    words = jieba.cut(text)
+    # 过滤掉单字词和类别名本身
+    word_freq = pd.Series(
+        [w for w in words if len(w) > 1 and w != category]
+    ).value_counts()
+    return word_freq.head(top_n)
+
+def plot_filtered_timeline(df, title):
+    """为筛选后的数据绘制时间线"""
+    fig = go.Figure()
+
+    # 按时间排序
+    df_sorted = df.sort_values('date')
+
+    # 添加散点图
+    fig.add_trace(go.Scatter(
+        x=df_sorted['date'],
+        y=df_sorted['rank'],
+        mode='markers+text',
+        text=df_sorted['title'],
+        textposition="top center",
+        marker=dict(
+            size=10,
+            color='red',
+            symbol='circle'
+        ),
+        hovertemplate="<b>%{text}</b><br>" +
+                     "时间: %{x}<br>" +
+                     "排名: %{y}<br>" +
+                     "<extra></extra>"
+    ))
+
+    # 更新布局
+    fig.update_layout(
+        title=title,
+        xaxis_title='时间',
+        yaxis_title='排名',
+        yaxis=dict(
+            autorange="reversed",  # 反转y轴使排名1在顶部
+            tickmode='array',
+            ticktext=[f'TOP {i}' for i in range(1, 51, 5)],
+            tickvals=list(range(1, 51, 5))
+        ),
+        height=400,
+        showlegend=False
+    )
+
+    return fig
+
+def analyze_filtered_results(df):
+    """对筛选结果进行深入分析"""
+    # 按年统计
+    df['year'] = df['date'].dt.year
+    yearly_stats = df.groupby('year').agg({
+        'title': 'count',
+        'rank': ['mean', 'min'],
+        'duration_mins': ['mean', 'max']
+    }).round(2)
+    yearly_stats.columns = ['热搜数量', '平均排名', '最高排名', '平均持续时间', '最长持续时间']
+
+    # 按月份分布
+    df['month'] = df['date'].dt.month
+    monthly_dist = df.groupby('month')['title'].count()
+
+    # 按小时分布
+    df['hour'] = df['date'].dt.hour
+    hourly_dist = df.groupby('hour')['title'].count()
+
+    # 创建分析图表
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=(
+            '年度热搜数量对比',
+            '月份分布',
+            '每日时段分布',
+            '排名与持续时间关系'
+        ),
+        specs=[[{"type": "bar"}, {"type": "bar"}],
+               [{"type": "bar"}, {"type": "scatter"}]]
+    )
+
+    # 1. 年度数量对比
+    fig.add_trace(
+        go.Bar(
+            x=yearly_stats.index,
+            y=yearly_stats['热搜数量'],
+            text=yearly_stats['热搜数量'],
+            textposition='auto',
+        ),
+        row=1, col=1
+    )
+
+    # 2. 月份分布
+    fig.add_trace(
+        go.Bar(
+            x=[f"{m}月" for m in monthly_dist.index],
+            y=monthly_dist.values,
+            text=monthly_dist.values,
+            textposition='auto',
+        ),
+        row=1, col=2
+    )
+
+    # 3. 时段分布
+    fig.add_trace(
+        go.Bar(
+            x=[f"{h:02d}:00" for h in hourly_dist.index],
+            y=hourly_dist.values,
+            text=hourly_dist.values,
+            textposition='auto',
+        ),
+        row=2, col=1
+    )
+
+    # 4. 排名与持续时间散点图
+    # 修改：使用时间戳而不是直接转换为int
+    timestamps = df['date'].astype('int64') // 10**9  # 转换为Unix时间戳
+    min_ts = timestamps.min()
+    max_ts = timestamps.max()
+    # 归一化时间戳到0-1区间，用于颜色映射
+    normalized_time = (timestamps - min_ts) / (max_ts - min_ts) if max_ts > min_ts else timestamps * 0
+
+    fig.add_trace(
+        go.Scatter(
+            x=df['rank'],
+            y=df['duration_mins'],
+            mode='markers',
+            marker=dict(
+                size=8,
+                color=normalized_time,  # 使用归一化后的时间
+                colorscale='Viridis',
+                showscale=True,
+                colorbar=dict(
+                    title="时间进程",
+                    ticktext=["早期", "中期", "后期"],
+                    tickvals=[0, 0.5, 1]
+                )
+            ),
+            hovertemplate=(
+                "排名: %{x}<br>" +
+                "持续时间: %{y}分钟<br>" +
+                "时间: " + df['date'].dt.strftime('%Y-%m-%d').astype(str) +
+                "<extra></extra>"
+            )
+        ),
+        row=2, col=2
+    )
+
+    # 更新布局
+    fig.update_layout(
+        height=800,
+        showlegend=False,
+        title_text="筛选结果深入分析"
+    )
+
+    # 更新x轴
+    fig.update_xaxes(title_text="年份", row=1, col=1)
+    fig.update_xaxes(title_text="月份", row=1, col=2)
+    fig.update_xaxes(title_text="时段", row=2, col=1)
+    fig.update_xaxes(title_text="排名", row=2, col=2)
+
+    # 更新y轴
+    fig.update_yaxes(title_text="热搜数量", row=1, col=1)
+    fig.update_yaxes(title_text="热搜数量", row=1, col=2)
+    fig.update_yaxes(title_text="热搜数量", row=2, col=1)
+    fig.update_yaxes(title_text="持续时间(分钟)", row=2, col=2)
+
+    return fig, yearly_stats
+
+def predict_yearly_trend(df):
+    """预测年度热搜趋势，只使用历史完整年份数据"""
+    # 按年月统计热搜数
+    df['year'] = df['date'].dt.year
+    df['month'] = df['date'].dt.month
+    monthly_counts = df.groupby(['year', 'month']).size().reset_index(name='count')
+
+    # 计算2025年的预计数量
+    current_year = 2025
+    current_data = monthly_counts[monthly_counts['year'] == current_year]
+
+    if not current_data.empty:
+        # 只使用历史完整年份的数据进行预测
+        yearly_counts = df[df['year'] < current_year].groupby('year').size().reset_index(name='count')
+
+        # 准备Prophet数据
+        prophet_df = pd.DataFrame({
+            'ds': pd.to_datetime(yearly_counts['year'].astype(str)),
+            'y': yearly_counts['count']
+        })
+
+        # 使用Prophet进行预测
+        model = Prophet(
+            yearly_seasonality=True,
+            changepoint_prior_scale=0.5,
+            changepoint_range=0.9
+        )
+        model.fit(prophet_df)
+
+        # 生成预测数据（包括2025年）
+        future = model.make_future_dataframe(periods=2, freq='Y')
+        forecast = model.predict(future)
+
+        # 获取2025年的预测值
+        predicted_total = forecast.loc[forecast['ds'].dt.year == current_year, 'yhat'].iloc[0]
+
+        # 创建图表
+        fig = go.Figure()
+
+        # 添加历史数据点
+        fig.add_trace(go.Scatter(
+            x=yearly_counts['year'],
+            y=yearly_counts['count'],
+            mode='markers',
+            name='历史数据',
+            marker=dict(size=10, color='blue')
+        ))
+
+        # 添加2025年实际数据点
+        actual_count = df[df['year'] == current_year].shape[0]
+        months_recorded = len(current_data)
+        fig.add_trace(go.Scatter(
+            x=[current_year],
+            y=[actual_count],
+            mode='markers',
+            name='2025年当前',
+            marker=dict(size=10, color='orange')
+        ))
+
+        # 添加趋势线
+        fig.add_trace(go.Scatter(
+            x=forecast['ds'].dt.year,
+            y=forecast['yhat'],
+            mode='lines',
+            name='趋势线',
+            line=dict(color='green', dash='dash')
+        ))
+
+        # 添加预测区间
+        fig.add_trace(go.Scatter(
+            x=forecast['ds'].dt.year.tolist() + forecast['ds'].dt.year.tolist()[::-1],
+            y=forecast['yhat_upper'].tolist() + forecast['yhat_lower'].tolist()[::-1],
+            fill='toself',
+            fillcolor='rgba(0,176,246,0.2)',
+            line=dict(color='rgba(255,255,255,0)'),
+            name='95% 置信区间'
+        ))
+
+        # 更新布局
+        fig.update_layout(
+            title=f'年度热搜数量趋势 (2025年预测: {predicted_total:.0f}条)',
+            xaxis_title='年份',
+            yaxis_title='热搜数量',
+            hovermode='x unified',
+            height=500
+        )
+
+        # 添加注释说明
+        fig.add_annotation(
+            text=(f"2025年实际情况：<br>" +
+                  f"已记录{months_recorded}个月，共{actual_count}条<br>" +
+                  f"基于历史数据预测全年：{predicted_total:.0f}条"),
+            xref="paper", yref="paper",
+            x=1, y=0,
+            xanchor='right', yanchor='bottom',
+            showarrow=False,
+            font=dict(size=10),
+            bgcolor="rgba(255,255,255,0.8)"
+        )
+
+        return fig, {
+            'months_recorded': months_recorded,
+            'current_count': actual_count,
+            'predicted_total': predicted_total
+        }
+
+    return None, None
+
 # 主应用
 def main():
     # 新增页面配置
@@ -844,44 +1552,76 @@ def main():
     tab1, tab2 = st.tabs(["Overall Analysis", "Single Category Analysis"])
 
     with tab1:
-        st.subheader('Monthly Trend Analysis')
-        st.plotly_chart(plot_monthly_trends(filtered_df))
+        # 创建子标签页
+        subtab1, subtab2, subtab3, subtab4 = st.tabs([
+            "趋势分析", "排名分析", "时间分布", "关联分析"
+        ])
 
-        st.subheader('Rank Distribution Analysis')
-        st.plotly_chart(plot_rank_distribution(filtered_df))
+        with subtab1:
+            # 添加基础统计信息
+            st.subheader('Base Statistics')
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    label="总热搜数量",
+                    value=f"{len(filtered_df):,}",
+                    help="筛选条件下的总热搜条目数"
+                )
+            with col2:
+                st.metric(
+                    label="平均排名",
+                    value=f"{filtered_df['rank'].mean():.2f}",
+                    delta="TOP 50" if filtered_df['rank'].mean() < 50 else "低位热搜",
+                    delta_color="off",
+                    help="热搜上榜平均最高排名（数值越小排名越高）"
+                )
+            with col3:
+                st.metric(
+                    label="平均持续时间",
+                    value=f"{filtered_df['duration_mins'].mean():.2f} 分钟",
+                    help="热搜在榜平均持续时间"
+                )
 
-        st.subheader('Duration Analysis')
-        st.plotly_chart(plot_duration_analysis(filtered_df))
+            st.subheader('Monthly Trend Analysis')
+            st.plotly_chart(plot_monthly_trends(filtered_df))
 
-        st.subheader('24-hour Distribution Analysis')
-        st.plotly_chart(plot_hourly_distribution(filtered_df))
+            # 添加年度趋势预测
+            st.subheader('Yearly Trend Prediction')
+            trend_fig, trend_stats = predict_yearly_trend(filtered_df)
+            if trend_fig and trend_stats:
+                # 显示预测统计
+                # 显示趋势图
+                st.plotly_chart(trend_fig, use_container_width=True)
+            else:
+                st.warning("暂无足够数据进行趋势预测")
 
-        # 数据统计
-        st.subheader('基础统计信息')
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(
-                label="总热搜数量",
-                value=f"{len(filtered_df):,}",
-                help="筛选条件下的总热搜条目数"
-            )
-        with col2:
-            st.metric(
-                label="平均排名",
-                value=f"{filtered_df['rank'].mean():.2f}",
-                delta="TOP 50" if filtered_df['rank'].mean() < 50 else "低位热搜",
-                delta_color="off",
-                help="热搜上榜平均最高排名（数值越小排名越高）"
-            )
-        with col3:
-            st.metric(
-                label="平均持续时间",
-                value=f"{filtered_df['duration_mins'].mean():.2f} 分钟",
-                help="热搜在榜平均持续时间"
-            )
+        with subtab2:
+            st.subheader('Rank Distribution Analysis')
+            st.plotly_chart(plot_rank_distribution(filtered_df))
+
+            st.subheader('Duration Analysis')
+            st.plotly_chart(plot_duration_analysis(filtered_df))
+
+
+        with subtab3:
+            st.subheader('24-hour Distribution Analysis')
+            st.plotly_chart(plot_hourly_distribution(filtered_df))
+
+            st.subheader('Monthly Distribution Analysis')
+            st.plotly_chart(plot_monthly_distribution(filtered_df))
+
+        with subtab4:
+            st.subheader('话题共现分析')
+            st.plotly_chart(plot_topic_cooccurrence(filtered_df))
+
+            st.subheader('传播速度分析')
+            st.plotly_chart(plot_topic_velocity(filtered_df))
+
+            st.subheader('话题影响力分析')
+            st.plotly_chart(plot_topic_impact_analysis(filtered_df))
 
     with tab2:
-        # 修改为单选控件（与下方保持一致）
+        # 保持类别选择在最上方
         selected_category = st.selectbox(
             "选择要分析的类别",
             options=categories,
@@ -889,140 +1629,297 @@ def main():
             key='category_selector'
         )
 
-        # 显示预测图表（修改为处理单个类别）
         if selected_category:
-            forecast_fig = plot_prophet_forecast(filtered_df, selected_category)
-            if forecast_fig:
-                st.plotly_chart(forecast_fig, use_container_width=True)
+            # 创建子标签页
+            subtab1, subtab2, subtab3, subtab4 = st.tabs([
+                "趋势预测", "时间线分析", "统计信息", "关键词分析"
+            ])
 
-        # 显示该类别的时间线图（保持原有代码）
-        if selected_category:
-            st.plotly_chart(plot_timeline_gantt(filtered_df, selected_category))
+            with subtab1:
+                st.subheader('热搜数量趋势预测')
+                forecast_fig = plot_prophet_forecast(filtered_df, selected_category)
+                if forecast_fig:
+                    st.plotly_chart(forecast_fig, use_container_width=True)
+                else:
+                    st.warning("数据量不足，无法进行预测")
 
-        # 显示该类别的统计信息（修改为使用columns布局）
-        category_df = filtered_df[filtered_df['category'] == selected_category]
-        st.subheader(f'{selected_category}类别统计信息')
+            with subtab2:
+                st.subheader('相关热搜时间线')
+                st.plotly_chart(plot_timeline_gantt(filtered_df, selected_category))
 
-        # 使用三列布局
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(
-                label="热搜数量",
-                value=len(category_df),
-                help="该类别下的总热搜条目数"
-            )
-        with col2:
-            st.metric(
-                label="平均排名",
-                value=f"{category_df['rank'].mean():.2f}",
-                delta="TOP 50" if category_df['rank'].mean() < 50 else "低位热搜",
-                delta_color="off",
-                help="该类别热搜的平均最高排名"
-            )
-        with col3:
-            st.metric(
-                label="平均持续时间",
-                value=f"{category_df['duration_mins'].mean():.2f} 分钟",
-                help="该类别热搜的平均在榜时间"
-            )
+            with subtab3:
+                # 统计信息部分
+                st.subheader(f'{selected_category}类别统计信息')
+                category_df = filtered_df[filtered_df['category'] == selected_category]
 
-        # 新增动态数据表
-        st.subheader('实时数据表')
+                # 使用三列布局显示基础统计
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        label="热搜数量",
+                        value=len(category_df),
+                        help="该类别下的总热搜条目数"
+                    )
+                with col2:
+                    st.metric(
+                        label="平均排名",
+                        value=f"{category_df['rank'].mean():.2f}",
+                        delta="TOP 50" if category_df['rank'].mean() < 50 else "低位热搜",
+                        delta_color="off",
+                        help="该类别热搜的平均最高排名"
+                    )
+                with col3:
+                    st.metric(
+                        label="平均持续时间",
+                        value=f"{category_df['duration_mins'].mean():.2f} 分钟",
+                        help="该类别热搜的平均在榜时间"
+                    )
 
-        # 添加日期范围选择（使用两列布局）
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input("开始日期",
-                value=category_df['date'].min().to_pydatetime(),
-                min_value=category_df['date'].min().to_pydatetime(),
-                max_value=category_df['date'].max().to_pydatetime())
-        with col2:
-            end_date = st.date_input("结束日期",
-                value=category_df['date'].max().to_pydatetime(),
-                min_value=category_df['date'].min().to_pydatetime(),
-                max_value=category_df['date'].max().to_pydatetime())
+                # 实时数据表
+                st.subheader('实时数据表')
 
-        # 添加多重排序选项
-        sort_cols = st.multiselect(
-            "排序字段（按优先级顺序）",
-            options=['上榜时间', '持续分钟', '最高排名'],
-            default=['上榜时间']
-        )
-        sort_orders = {col: st.selectbox(
-            f"{col}排序方向",
-            ['升序 ↑', '降序 ↓'],
-            key=f"order_{col}"
-        ) for col in sort_cols}
+                # 日期范围选择
+                col1, col2 = st.columns(2)
+                with col1:
+                    start_date = st.date_input(
+                        "开始日期",
+                        value=category_df['date'].min().to_pydatetime(),
+                        min_value=category_df['date'].min().to_pydatetime(),
+                        max_value=category_df['date'].max().to_pydatetime()
+                    )
+                with col2:
+                    end_date = st.date_input(
+                        "结束日期",
+                        value=category_df['date'].max().to_pydatetime(),
+                        min_value=category_df['date'].min().to_pydatetime(),
+                        max_value=category_df['date'].max().to_pydatetime()
+                    )
 
-        # 处理数据
-        dynamic_df = category_df[['title', 'date', 'duration_mins', 'rank']].copy()
-        # 新增链接列
-        dynamic_df['link'] = dynamic_df['title'].apply(
-            lambda x: f'https://s.weibo.com/weibo?q=%23{urllib.parse.quote(x)}%23'
-        )
-        dynamic_df = dynamic_df[
-            (dynamic_df['date'].dt.date >= start_date) &
-            (dynamic_df['date'].dt.date <= end_date)
-        ]
-
-        # 应用多重排序
-        if sort_cols:
-            sort_ascending = [
-                order == '升序 ↑' for col, order in sort_orders.items()
-            ]
-            dynamic_df = dynamic_df.sort_values(
-                by=[col.replace('上榜时间', 'date')
-                    .replace('持续分钟', 'duration_mins')
-                    .replace('最高排名', 'rank') for col in sort_cols],
-                ascending=sort_ascending
-            )
-        else:
-            dynamic_df = dynamic_df.sort_values('date', ascending=False)
-
-        # 格式化显示（修改列名并添加链接列）
-        display_df = dynamic_df.copy()
-        display_df.columns = ['热搜标题', '上榜时间', '持续分钟', '最高排名', '实时链接']
-
-        # 使用增强版数据表格（修改列配置）
-        st.data_editor(
-            display_df,
-            height=400,
-            column_config={
-                "实时链接": st.column_config.LinkColumn(
-                    help="点击查看实时微博讨论",
-                    display_text="查看",
-                    width="small"
-                ),
-                "热搜标题": st.column_config.Column(
-                    width="large"
-                ),
-                "上榜时间": st.column_config.DatetimeColumn(
-                    format="YYYY-MM-DD HH:mm",
-                    help="热搜首次上榜时间"
-                ),
-                "持续分钟": st.column_config.ProgressColumn(
-                    format="%d 分钟",
-                    help="热搜持续时长",
-                    min_value=0,
-                    max_value=int(display_df['持续分钟'].max() * 1.2)
-                ),
-                "最高排名": st.column_config.NumberColumn(
-                    format="TOP %d",
-                    help="历史最高排名"
+                # 排序选项
+                sort_cols = st.multiselect(
+                    "排序字段（按优先级顺序）",
+                    options=['上榜时间', '持续分钟', '最高排名'],
+                    default=['上榜时间']
                 )
-            },
-            use_container_width=True,
-            key=f"datagrid_{selected_category}",
-            disabled=True
+
+                # 显示增强版数据表格
+                display_df = prepare_display_dataframe(category_df, start_date, end_date, sort_cols)
+                st.data_editor(
+                    display_df,
+                    height=400,
+                    column_config=get_column_config(display_df),
+                    use_container_width=True,
+                    key=f"datagrid_{selected_category}",
+                    disabled=True
+                )
+
+            with subtab4:
+                # 关键词分析部分
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader('热搜关键词TOP20')
+                    st.plotly_chart(
+                        plot_word_frequency(filtered_df, selected_category),
+                        use_container_width=True
+                    )
+
+                    # 显示热门关键词列表供参考
+                    st.write('#### 常见关键词参考')
+                    top_keywords = get_top_keywords(filtered_df, selected_category)
+                    keyword_text = ', '.join([f"{word}({count}次)" for word, count in top_keywords.items()])
+                    st.text_area(
+                        "按出现次数排序的关键词列表",
+                        keyword_text,
+                        height=100,
+                        help="可以复制这些关键词用于筛选分析"
+                    )
+
+                with col2:
+                    st.subheader('关键词模式分析')
+
+                    # 添加日期范围选择
+                    date_col1, date_col2 = st.columns(2)
+                    with date_col1:
+                        kw_start_date = st.date_input(
+                            "分析开始日期",
+                            value=category_df['date'].min().date(),
+                            min_value=category_df['date'].min().date(),
+                            max_value=category_df['date'].max().date(),
+                            key="kw_start_date"
+                        )
+                    with date_col2:
+                        kw_end_date = st.date_input(
+                            "分析结束日期",
+                            value=category_df['date'].max().date(),
+                            min_value=category_df['date'].min().date(),
+                            max_value=category_df['date'].max().date(),
+                            key="kw_end_date"
+                        )
+
+                    include_expression = st.text_area(
+                        '包含关键词表达式',
+                        help='输入包含关键词的逻辑表达式，支持 and/or 和括号'
+                    )
+
+                    exclude_expression = st.text_area(
+                        '排除关键词表达式',
+                        help='输入要排除的关键词的逻辑表达式，支持 and/or 和括号'
+                    )
+
+                    must_include_main = st.checkbox(
+                        f'必须包含主关键词"{selected_category}"',
+                        value=True
+                    )
+
+                    # 添加示例
+                    st.markdown("""
+                    #### 示例:
+                    - `发烧 and (医院 or 诊所)`：标题中必须包含"发烧"，且包含"医院"或"诊所"之一
+                    - `(重症 or 危重) and 治疗`：标题中必须包含"重症"或"危重"之一，且包含"治疗"
+                    """)
+
+                # 关键词筛选结果
+                if include_expression or exclude_expression:
+                    filtered_results, stats = analyze_keyword_patterns(
+                        filtered_df,
+                        selected_category,
+                        include_expression,
+                        exclude_expression,
+                        must_include_main,
+                        kw_start_date,
+                        kw_end_date
+                    )
+
+                    # 显示筛选统计
+                    st.write('#### 筛选结果统计')
+                    if stats['时间范围']:
+                        st.write(f"时间范围: {stats['时间范围']}")
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric('符合条件的热搜数', stats['符合条件的热搜数'])
+                    col2.metric('占该类别总数比例', stats['占该类别总数比例'])
+                    col3.metric('平均排名', stats['平均排名'])
+                    col4.metric('平均持续时间', stats['平均持续时间'])
+
+                    # 显示筛选结果时间线
+                    if not filtered_results.empty:
+                        st.plotly_chart(
+                            plot_filtered_timeline(
+                                filtered_results,
+                                f'符合条件的{selected_category}类热搜时间线'
+                            ),
+                            use_container_width=True
+                        )
+
+                        # 添加深入分析
+                        st.write('#### 筛选结果深入分析')
+                        analysis_fig, yearly_stats = analyze_filtered_results(filtered_results)
+
+                        # 显示年度统计表格
+                        st.write('##### 年度统计数据')
+                        st.dataframe(
+                            yearly_stats,
+                            use_container_width=True
+                        )
+
+                        # 添加年度趋势预测
+                        st.write('##### 年度趋势预测')
+                        trend_fig, trend_stats = predict_yearly_trend(filtered_results)
+                        if trend_fig and trend_stats:
+                            # 显示预测统计
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric(
+                                "2025年已记录月数",
+                                f"{trend_stats['months_recorded']}个月"
+                            )
+                            col2.metric(
+                                "2025年月均热搜数",
+                                f"{trend_stats['current_count']:.1f}条"
+                            )
+                            col3.metric(
+                                "2025年预计总数",
+                                f"{trend_stats['predicted_total']:.0f}条"
+                            )
+
+                            # 显示趋势图
+                            st.plotly_chart(trend_fig, use_container_width=True)
+                        else:
+                            st.info("筛选结果数据量不足，无法进行趋势预测")
+
+                        # 显示分析图表
+                        st.plotly_chart(
+                            analysis_fig,
+                            use_container_width=True
+                        )
+
+                        # 显示热搜详情
+                        st.write('#### 符合条件的热搜详情')
+                        st.dataframe(
+                            filtered_results[['title', 'date', 'rank', 'duration_mins']],
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning('没有找到符合条件的热搜')
+
+# 新增辅助函数
+def prepare_display_dataframe(df, start_date, end_date, sort_cols):
+    """准备用于显示的数据框"""
+    # 首先选择需要的列
+    display_df = df[['title', 'date', 'duration_mins', 'rank']].copy()
+
+    # 应用日期过滤
+    display_df = display_df[
+        (display_df['date'].dt.date >= start_date) &
+        (display_df['date'].dt.date <= end_date)
+    ]
+
+    # 添加链接列
+    display_df['link'] = display_df['title'].apply(
+        lambda x: f'https://s.weibo.com/weibo?q=%23{urllib.parse.quote(x)}%23'
+    )
+
+    # 应用排序
+    if sort_cols:
+        sort_ascending = [True] * len(sort_cols)
+        sort_columns = [
+            col.replace('上榜时间', 'date')
+               .replace('持续分钟', 'duration_mins')
+               .replace('最高排名', 'rank')
+            for col in sort_cols
+        ]
+        display_df = display_df.sort_values(by=sort_columns, ascending=sort_ascending)
+
+    # 重命名列
+    display_df.columns = ['热搜标题', '上榜时间', '持续分钟', '最高排名', '实时链接']
+
+    return display_df
+
+def get_column_config(df):
+    """获取数据表格的列配置"""
+    return {
+        "实时链接": st.column_config.LinkColumn(
+            help="点击查看实时微博讨论",
+            display_text="查看",
+            width="small"
+        ),
+        "热搜标题": st.column_config.Column(
+            width="large"
+        ),
+        "上榜时间": st.column_config.DatetimeColumn(
+            format="YYYY-MM-DD HH:mm",
+            help="热搜首次上榜时间"
+        ),
+        "持续分钟": st.column_config.ProgressColumn(
+            format="%d 分钟",
+            help="热搜持续时长",
+            min_value=0,
+            max_value=int(df['持续分钟'].max() * 1.2)
+        ),
+        "最高排名": st.column_config.NumberColumn(
+            format="TOP %d",
+            help="历史最高排名"
         )
-
-        # 显示该类别的原始数据（保持原有代码）
-        if st.checkbox(f'显示{selected_category}原始数据'):
-            st.write(category_df)
-
-    # 原始数据展示
-    if st.checkbox('显示所有原始数据'):
-        st.write(filtered_df)
+    }
 
 if __name__ == "__main__":
     main()
