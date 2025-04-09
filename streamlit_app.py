@@ -1499,12 +1499,7 @@ def main():
     # 加载数据
     markdown_folder = 'raw-markdown'
     default_files = [
-         f'{markdown_folder}/咳嗽.md',f'{markdown_folder}/飞机.md',f'{markdown_folder}/肺炎.md',
-        f'{markdown_folder}/感冒.md', f'{markdown_folder}/甲流.md',
-        f'{markdown_folder}/离世.md', f'{markdown_folder}/流感.md',
-        f'{markdown_folder}/去世.md', f'{markdown_folder}/生病.md',
-        f'{markdown_folder}/心梗.md', f'{markdown_folder}/支原体.md',
-        f'{markdown_folder}/坠机.md'
+         f'{markdown_folder}/咳嗽.md'
     ]
     st.sidebar.caption("[点击查看示例md文件](https://github.com/Feather-2/Wb-Health-Trend-Analysis/blob/main/raw-markdown/%E6%94%AF%E5%8E%9F%E4%BD%93.md)")
     # 新增文件上传功能
